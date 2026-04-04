@@ -1,0 +1,22 @@
+sac
+# 提取模型估计的参数
+rho = sac.rho  # 空间自回归参数
+lam = sac.lam  # 误差自相关参数
+beta = sac.betas.flatten()  # 系数向量
+
+# 计算变换后的变量
+I = np.eye(n)
+W = w.full()[0] if hasattr(w, 'full') else w  # 确保W是矩阵
+
+# 计算行列式（近似）
+det_IrW = np.linalg.det(I - rho * W)
+det_IrW_lambda = np.linalg.det(I - lam * W)
+
+# 计算残差
+u = sac.u
+sigma2 = np.dot(u.T, u) / n
+
+# 近似对数似然
+logll_approx2 = -n/2 * np.log(2*np.pi*sigma2) - 1/(2*sigma2)*np.dot(u.T, u) + np.log(abs(det_IrW)) + np.log(abs(det_IrW_lambda))
+
+print(f"近似 Log-Likelihood（考虑空间效应）: {logll_approx2}")
