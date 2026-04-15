@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-Created on Fri Mar 27 19:53:17 2026
+Created on Thu Apr  9 05:19:16 2026
 
 @author: 86183
 """
+
 
 import numpy as np
 import pandas as pd
@@ -18,19 +19,22 @@ from scipy.stats import chi2
 # ---------------------------
 # 数据
 # ---------------------------
-df2 = pd.read_csv("df2.csv")
-
+df2 = pd.read_csv("df2_5k.csv")
+df2["ln_access"] = np.log(df2["access"])
 gdf = gpd.read_file("boundary.shp")
 gdf = gdf.merge(df2, on="STREET")
 
-y = df2["ln_access"]#.values #.reshape(-1,1)
+y = df2["ln_access_5k"]#.values #.reshape(-1,1)
 
-X2 = df2[["road1","ln_road2","ln_gdp","ln_price","ln_poi","build"]]
+X2 = df2[["ln_access", "road1","ln_road2","ln_gdp","ln_price","ln_poi","build"]] # 加入了 2k 作为自变量
+# X2 = df2[["road1","ln_road2",         "ln_price","ln_poi","build"]]
+# X2 = df2[[        "ln_road2",         "ln_price","ln_poi","build"]]
+
 # X4 = df2[[ "road1", "ln_road2", "ln_price", "build" ]] # - ln _gdp
 
 X = X2
-X = sm.add_constant(X)
 
+X = sm.add_constant(X)
 # X = X4
 # ---------------------------
 # 显著性函数
@@ -71,7 +75,7 @@ X_arr = X.values
 # 行名
 # ---------------------------
 param_rows = [
-    "CONSTANT",
+    "CONSTANT", "ln_access",
     "road1","ln_road2","ln_gdp","ln_price","ln_poi","build",
     # "W_road1","W_ln_road2","W_ln_gdp","W_ln_price","W_ln_poi","W_build",
     # "rho"
@@ -169,11 +173,11 @@ for w_name, w in weights.items():
 
     sar_table.loc["Log Likelihood", w_name] = f"{logll:.3f}"
     sar_table.loc["Akaike Info Criterion", w_name] = f"{aic:.3f}"
-    print(f"{aic:.3f}")
+    # print(f"{aic:.3f}")
     sar_table.loc["Schwarz Criterion", w_name] = f"{schwarz:.3f}"
 
     # ---------- Wald 统计量 ----------
-    # 对 lambda 的 Wald 检验：W = (lambda / se_lambda)^2
+    # 对 rho 的 Wald 检验：W = (lambda / se_lambda)^2
     rho_idx = len(param_rows) - 1
     rho = betas[rho_idx] if rho_idx < len(betas) else np.nan
     se_rho = se_all[rho_idx] if rho_idx < len(se_all) else np.nan
@@ -182,6 +186,8 @@ for w_name, w in weights.items():
     k = X.shape[1]
     wald_p_value = 1 - chi2.cdf(wald, df=k)
     sar_table.loc["Wald_p", w_name] = f"{wald_p_value:.3f}"
+
+    
 
     # ---------- LR 统计量 ----------
     # 与同一权重矩阵下 OLS 比较：LR = 2 * (LL_sem - LL_ols)
@@ -198,4 +204,4 @@ for w_name, w in weights.items():
     sar_table.loc["Lagrange Multiplier (LM)", w_name] = f"{lm:.3f}"
 
 # 导出
-# sar_table.to_excel("SAR_X2_multiW_2k.xlsx")
+sar_table.to_excel("SAR_X2_multiW_5k+2k.xlsx")

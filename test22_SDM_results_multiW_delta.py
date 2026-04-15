@@ -1,39 +1,38 @@
 # -*- coding: utf-8 -*-
 """
-Created on Fri Mar 27 12:19:17 2026
+Created on Thu Apr  9 05:40:12 2026
 
 @author: 86183
 """
 
-import geopandas as gpd
-import pandas as pd
+# %%
+
 import numpy as np
-import statsmodels.api as sm
-# import spreg
+import pandas as pd
+import geopandas as gpd
+from esda.moran import Moran
 from libpysal.weights import Queen, DistanceBand, KNN
 from spreg import ML_Lag, ML_Error, OLS
-from spreg import GM_Combo
-# from spreg import ML_Combo
-from spreg import diagnostics
-from esda.moran import Moran
 from scipy.stats import chi2
-from scipy import stats
 
-
-
+# ---------------------------
+# 数据
+# ---------------------------
 df2 = pd.read_csv("df2_5k.csv")
+df2["ln_access"] = np.log(df2["access"])
+df2["delta"] = df2["ln_access_5k"] - df2["ln_access"]
 
 gdf = gpd.read_file("boundary.shp")
 gdf = gdf.merge(df2, on="STREET")
 
-y = df2["ln_access_5k"].values.reshape(-1,1)
+# y = df2["ln_access_5k"].values #.reshape(-1,1)
+y = df2["delta"]
 
 X2 = df2[["road1","ln_road2","ln_gdp","ln_price","ln_poi","build"]]
-
-# y = df2["ln_access"]
+# X4 = df2[[ "road1", "ln_road2", "ln_price", "build" ]] # - ln _gdp
 
 X = X2
-
+# X = X4
 # ---------------------------
 # 显著性函数
 # ---------------------------
@@ -65,8 +64,6 @@ weights = {
 
 for w in weights.values():
     w.transform = "r"
-# %%
-
 
 # ---------------------------
 # 行名
@@ -74,10 +71,10 @@ for w in weights.values():
 param_rows = [
     "CONSTANT",
     "road1","ln_road2","ln_gdp","ln_price","ln_poi","build",
-    # "W_road1","W_ln_road2","W_ln_gdp","W_ln_price","W_ln_poi","W_build",
+    "ln_access",
+    "W_road1","W_ln_road2","W_ln_gdp","W_ln_price","W_ln_poi","W_build",
     # "rho"
-    "W_ln_access",
-    "lambda"
+    "W_ln_access"
 ]
 
 stat_rows = [
@@ -96,8 +93,6 @@ stat_rows = [
     "LR_SEM_p",
     "Lagrange Multiplier (LM)"
 ]
-# %%
-
 
 rows = param_rows + stat_rows
 table = pd.DataFrame(index=rows, columns=weights.keys())
@@ -110,23 +105,6 @@ for name, w in weights.items():
     # OLS 基准
     ols = OLS(y, X.values, w=w, spat_diag=True)
 
-    # SAC（Spatial Autoregressive Combined / SARAR 模型）
-    sac = GM_Combo(
-        y,
-        X.values,
-        w=w,
-        name_y="ln_access",
-        name_x=list(X.columns)
-    )
-    # sac = ML_Combo(
-    #     y,
-    #     X.values,
-    #     w=w,
-    #     name_y="ln_access",
-    #     name_x=list(X.columns)
-    # )
-    
-    
     # SAR 基准
     sar = ML_Lag(
         y,
@@ -146,99 +124,49 @@ for name, w in weights.items():
         name_x=list(X.columns)
     )
 
+
     # SDM (Durbin)
-    # sdm = ML_Lag(
-    #     y,
-    #     X.values,
-    #     w=w,
-    #     slx_lags=1,
-    #     name_y="ln_access",
-    #     name_x=list(X.columns)
-    # )
+    sdm = ML_Lag(
+        y,
+        X.values,
+        w=w,
+        slx_lags=1,
+        name_y="ln_access",
+        name_x=list(X.columns),
 
-    betas = np.array(sac.betas).flatten()
+    )
 
-    # std = np.array(sac.std_err).flatten()
-    std = np.array(sac.std_err).flatten()
-    std = np.append(std, sac.std_y)
+    betas = np.array(sdm.betas).flatten()
 
+    std = np.array(sdm.std_err).flatten()
 
-    pvals = [i[1] for i in sac.z_stat]
+    pvals = [i[1] for i in sdm.z_stat]
 
-    # names = sac.name_x + sac.name_yend
-    names = sac.name_z
-
+    names = sdm.name_x
 
     for n,c,se,p in zip(names,betas,std,pvals):
         table.loc[n,name] = f"{c:.3f}{star(p)}\n({se:.3f})"
     
-    # table.loc["lambda"]
-    n_x = len(sac.name_x)
-    p = sac.z_stat[n_x][1]
-    se = std[n_x]
-    table.loc["W_ln_access_5k", name] = f"{sac.rho[0]:.3f}{star(p)}\n({se:.3f})"
-    
-    ###### 手动计算 lambda 的标准差和p值
-    lambda_est = betas[-1]
-    lambda_se = sac.vm[-1][-1] # 从VM协方差矩阵中找到 lambda 的方差
-    # z 统计量 = 估计值 / 标准误
-    z_stat = lambda_est / lambda_se
-
-    # 双侧检验 p 值
-    p_value = 2 * (1 - stats.norm.cdf(abs(z_stat)))
-    table.loc["lambda", name] = f"{lambda_est:.3f}{star(p_value)}\n({lambda_se:.3f})"
+    # table.loc["rho", name] = f"{sdm.rho:.3f{star()}}
 
     # ------------------
     # 残差 Moran's I
     # ------------------
-    moran = Moran(sac.u, w)
+    moran = Moran(sdm.u, w)
     table.loc["Residual Moran's I",name] = f"{moran.I:.3f}\n[{moran.p_norm:.3f}]"
 
     # ------------------
     # R2
     # ------------------
-    if hasattr(sac,"pr2"):
-        table.loc["R2",name] = f"{sac.pr2:.3f}"
+    if hasattr(sdm,"pr2"):
+        table.loc["R2",name] = f"{sdm.pr2:.3f}"
 
     # ------------------
     # LogLik / AIC / SC
     # ------------------
-    
-    ###### method 1
-       
-    # 提取模型估计的参数
-    rho = sac.rho  # 空间自回归参数
-    # lam = sac.lam  # 误差自相关参数
-    lam = sac.betas[-1]
-    beta = sac.betas.flatten()  # 系数向量
-    
-    # 计算变换后的变量
-    n = len(y)
-    I = np.eye(n)
-    W = w.full()[0] if hasattr(w, 'full') else w  # 确保W是矩阵
-    
-    # 计算行列式（近似）
-    det_IrW = np.linalg.det(I - rho * W)
-    det_IrW_lambda = np.linalg.det(I - lam * W)
-    
-    # 计算残差
-    u = sac.u
-    sigma2 = np.dot(u.T, u) / n
-    
-    # 近似对数似然
-    logll_approx2 = -n/2 * np.log(2*np.pi*sigma2) - 1/(2*sigma2)*np.dot(u.T, u) + np.log(abs(det_IrW)) + np.log(abs(det_IrW_lambda))
-    
-    # print(f"近似 Log-Likelihood（考虑空间效应）: {logll_approx2}")
-
-    ###### method 2
-    sac.utu = np.sum((y - sac.predy)**2)
-    # logll = diagnostics.log_likelihood(sac)
-    sac.logll = logll_approx2[0][0]
-    table.loc["Log Likelihood",name] = f"{sac.logll:.3f}" 
-    aic = diagnostics.akaike(sac)
-    table.loc["Akaike Info Criterion",name] = f"{aic:.3f}"
-    schwarz = diagnostics.schwarz(sac)
-    table.loc["Schwarz Criterion",name] = f"{schwarz:.3f}"
+    table.loc["Log Likelihood",name] = f"{sdm.logll:.3f}"
+    table.loc["Akaike Info Criterion",name] = f"{sdm.aic:.3f}"
+    table.loc["Schwarz Criterion",name] = f"{sdm.schwarz:.3f}"
 
 
     k = X.shape[1]
@@ -259,33 +187,32 @@ for name, w in weights.items():
     # ------------------
     # LR
     # ------------------
-    lr = 2*(sac.logll - ols.logll)
+    # lr = 2*(sdm.logll - ols.logll)
     # LR 比较 SAR
-    lr_sar = 2 * (sac.logll - sar.logll)
+    lr_sar = 2 * (sdm.logll - sar.logll)
     lr_sar_p = 1 - chi2.cdf(lr_sar, df=k)
 
     table.loc["LR_SAR",name] = f"{lr_sar:.3f}"
     table.loc["LR_SAR_p", name] = f"{lr_sar_p:.3f}"
 
-    lr_sem = 2 * (sac.logll - sem.logll)
+    lr_sem = 2 * (sdm.logll - sem.logll)
     lr_sem_p = 1 - chi2.cdf(lr_sem, df=k)
     
     table.loc["LR_SEM",name] = f"{lr_sem:.3f}"
     table.loc["LR_SEM_p", name] = f"{lr_sem_p:.3f}"
 
-    # # ------------------
-    # # LM
-    # # ------------------
+    # ------------------
+    # LM
+    # ------------------
     table.loc["Lagrange Multiplier (LM)",name] = f"{ols.lm_lag[0]:.3f}"
     
 # ---------------------------
 # 输出
 # ---------------------------
-# table.to_excel("SAC_result_multiW_5k.xlsx")
-# 
+# table.to_excel("SDM1_results_multiW_delta.xlsx")
+print(table)
 
 
 
-
-
-
+# %%
+1

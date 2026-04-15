@@ -199,7 +199,7 @@ for w_name, w in weights.items():
 
     # ---------- LM 统计量 ----------
     # 采用同一权重矩阵下 OLS 的 LM_Error
-    lm = ols_model.lm_error[0] if hasattr(ols_model, "lm_error") else np.nan
+    lm = ols_model.lm_error[0] if hasattr(ols_model, "lm_lag") else np.nan
     sar_table.loc["Lagrange Multiplier (LM)", w_name] = f"{lm:.3f}"
 
 # 导出
